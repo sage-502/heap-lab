@@ -2,9 +2,11 @@
 
 힙 익스플로잇 공부 기록 모음집
 
-이 레포는 glibc malloc 기반 heap allocator의 동작을 코드, 컴파일, gdb 디버깅을 통해 관찰하고, 이후 heap 취약점과 익스플로잇 기법으로 확장하는 것을 목표로 한다.
+이 레포는 glibc malloc 기반 heap allocator의 동작을 코드, 컴파일, gdb 디버깅을 통해 관찰하고, </br>
+이후 heap 취약점과 익스플로잇 기법으로 확장하는 것을 목표로 한다.
 
-기존 stack-lab이 스택 기반 취약점과 익스플로잇을 다뤘다면, heap-lab은 익스플로잇보다 먼저 malloc/free의 동작, chunk 구조, free list, bin, tcache 등 allocator 내부 구조를 이해하는 데 집중한다.
+기존 stack-lab이 스택 기반 취약점과 익스플로잇을 다뤘다면, </br>
+heap-lab은 익스플로잇보다 먼저 malloc/free의 동작, chunk 구조, free list, bin, tcache 등 allocator 내부 구조를 이해하는 데 집중한다.
 
 ※ 가상머신 또는 Docker 환경에서만 사용할 것을 추천.
 
@@ -36,48 +38,42 @@
 * Ubuntu 24.04
 * glibc 2.39
 
-glibc 2.31을 메인으로 사용하는 이유는 tcache가 존재하지만 safe-linking이 없어 heap allocator 동작과 tcache 기반 기법을 처음 관찰하기 좋기 때문이다.
-
-glibc 2.39는 최신 환경에서 동일한 코드 또는 payload가 왜 다르게 동작하는지 비교하기 위한 환경으로 사용한다.
-
 ---
 
 ## 구성
+
+1부, 2부, 번외로 구성했다.
 
 ```text
 heap-lab/
 ├── README.md
 ├── docker-compose.yml
 ├── docker/
-│   ├── glibc-2.31/
-│   │   └── Dockerfile
-│   └── glibc-2.39/
-│       └── Dockerfile
-│
 ├── env.md
 ├── memo.md
 ├── images/
 │
-│   # 1부
-├── heap-intro/
-├── chunk-layout/
-├── malloc-free/
-├── tcache-basic/
-├── fastbin-basic/
-├── unsorted-bin-basic/
-├── allocator-flow/
+├── part1-allocator/
+│   ├── 00-heap-intro/
+│   ├── 01-chunk-layout/
+│   ├── 02-malloc-free/
+│   ├── 03-tcache-basic/
+│   ├── 04-fastbin-basic/
+│   ├── 05-unsorted-bin-basic/
+│   └── 06-allocator-flow/
 │
-│   # 2부
-├── uaf-basic/
-├── double-free-basic/
-├── heap-overflow-basic/
-├── tcache-poisoning/
-├── fastbin-dup/
+├── part2-vulnerability/
+│   ├── 00-uaf-basic/
+│   ├── 01-double-free-basic/
+│   └── 02-heap-overflow-basic/
 │
-│   # 번외
-└── version-diff/
-    ├── safe-linking/
-    └── glibc-2.31-vs-2.39/
+├── part3-exploitation/
+│   ├── 00-tcache-poisoning/
+│   └── 01-fastbin-dup/
+│
+└── appendix-version-diff/
+    ├── 00-safe-linking/
+    └── 01-glibc-2.31-vs-2.39/
 ```
 
 ## 실습 원칙
