@@ -57,15 +57,15 @@ heap-lab/
 │   ├── 00-heap-intro/
 │   ├── 01-chunk-layout/
 │   ├── 02-malloc-free/
-│   ├── 03-tcache-basic/
-│   ├── 04-fastbin-basic/
-│   ├── 05-unsorted-bin-basic/
+│   ├── 03-tcache/
+│   ├── 04-fastbin/
+│   ├── 05-unsorted-bin/
 │   └── 06-allocator-flow/
 │
 ├── part2-vulnerability/
-│   ├── 00-uaf-basic/
-│   ├── 01-double-free-basic/
-│   └── 02-heap-overflow-basic/
+│   ├── 00-uaf/
+│   ├── 01-double-free/
+│   └── 02-heap-overflow/
 │
 ├── part3-exploitation/
 │   ├── 00-tcache-poisoning/
