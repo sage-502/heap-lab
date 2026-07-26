@@ -1,0 +1,11 @@
+FROM ubuntu:24.04
+
+# apt 대화형 프롬프트 방지 (tzdata 등에서 멈추는 것 방지)
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY setup.sh /setup.sh
+RUN chmod +x /setup.sh && /setup.sh
+
+WORKDIR /heap-lab
+
+CMD ["bash"]
