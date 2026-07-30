@@ -73,4 +73,4 @@ echo
 echo "[!] ASLR on/off은 실습별로 직접 제어하세요."
 echo "    예: echo 0 | sudo tee /proc/sys/kernel/randomize_va_space"
 
-echo "[+] setup complete"
+echo "[+] setup complete
