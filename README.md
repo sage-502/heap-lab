@@ -49,7 +49,6 @@ heap-lab/
 ├── README.md
 ├── docker-compose.yml
 ├── docker/
-├── env.md
 ├── memo.md
 ├── images/
 │
