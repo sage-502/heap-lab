@@ -110,33 +110,24 @@ chunk-layout/
 
 ## 사용법
 
-### 1. Docker 환경 실행
+### 1. 컨테이너 진입
 
 ```bash
 docker compose run --rm glibc231
 ```
 
-비교 환경 실행:
+컨테이너 내에 heap-lab 레포 전체 마운트
+
+### 2. 실습
 
 ```bash
-docker compose run --rm glibc239
-```
-
-### 2. 실습 빌드
-
-```bash
-cd chunk-layout
+cd part1-allocator/03-tcache
 bash build.sh
-```
-
-### 3. gdb 분석
-
-```bash
 gdb ./sample
 ```
 
-또는
+### 3. 컨테이너 나오기
 
-```bash
-gdb ./vuln
+``` bash
+exit
 ```
