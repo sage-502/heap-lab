@@ -109,23 +109,24 @@ chunk-layout/
 
 ## 사용법
 
-### 0. 컨테이너 생성 및 진입
+### 1. 초기 세팅
 
 ```bash
- # 최초 1번, 이미지 2개 생성
-docker compose build
+git clone https://github.com/sage-502/heap-lab
+cd heap-lab
+
+docker compose build    # 최초 1번, 이미지 2개 생성
 ```
 
 컨테이너 내에 heap-lab 레포 전체 마운트
 
-### 1. 컨테이너 진입
+### 2. 컨테이너 진입
 
 ```bash
-# 이후 매번, 빠르게 뜸
-docker compose run --rm glibc231
+docker compose run --rm glibc231    # 이후 매번, 빠르게 뜸
 ```
 
-### 2. 실습 (컨테이너 내부)
+### 3. 실습 (컨테이너 내부)
 
 ```bash
 cd part1-allocator/03-tcache
@@ -133,7 +134,7 @@ bash build.sh
 gdb ./sample
 ```
 
-### 3. 컨테이너 나오기
+### 4. 컨테이너 나오기
 
 ``` bash
 exit
