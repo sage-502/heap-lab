@@ -109,15 +109,23 @@ chunk-layout/
 
 ## 사용법
 
-### 1. 컨테이너 진입
+### 0. 컨테이너 생성 및 진입
 
 ```bash
-docker compose run --rm glibc231
+ # 최초 1번, 이미지 2개 생성
+docker compose build
 ```
 
 컨테이너 내에 heap-lab 레포 전체 마운트
 
-### 2. 실습
+### 1. 컨테이너 진입
+
+```bash
+# 이후 매번, 빠르게 뜸
+docker compose run --rm glibc231
+```
+
+### 2. 실습 (컨테이너 내부)
 
 ```bash
 cd part1-allocator/03-tcache
