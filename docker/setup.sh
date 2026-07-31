@@ -28,22 +28,7 @@ pip3 install --break-system-packages pwntools 2>/dev/null || pip3 install pwntoo
 echo "[+] pwntools 설치 완료"
 
 # ---------------------------
-# 3. pwndbg 설치 (heap 관찰용 gdb 확장)
-#    heap, bins, tcache, vis_heap_chunks 등 명령어 제공
-# ---------------------------
-echo "[*] pwndbg 설치 시작"
-if [ -d "/opt/pwndbg" ]; then
-    echo "[+] pwndbg already installed"
-else
-    git clone https://github.com/pwndbg/pwndbg /opt/pwndbg
-    cd /opt/pwndbg
-    ./setup.sh
-    cd -
-fi
-echo "[+] pwndbg 설치 완료"
-
-# ---------------------------
-# 4. 분석용 계정 생성 (최소 권한)
+# 3. 분석용 계정 생성 (최소 권한)
 # ---------------------------
 echo "[*] baby 유저 생성 시작"
 if id "baby" &>/dev/null; then
@@ -58,13 +43,13 @@ deluser baby sudo &>/dev/null || true
 echo "[+] baby 유저 생성 완료"
 
 # ---------------------------
-# 5. glibc 버전 확인 (컨테이너별 기준 확인용)
+# 4. glibc 버전 확인 (컨테이너별 기준 확인용)
 # ---------------------------
 echo "[*] 현재 glibc 버전:"
 ldd --version | head -n 1
 
 # ---------------------------
-# 6. ASLR 상태 안내
+# 5. ASLR 상태 안내
 # ---------------------------
 echo "[*] ASLR 현재 상태:"
 cat /proc/sys/kernel/randomize_va_space
