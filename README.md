@@ -131,8 +131,10 @@ docker compose run --rm glibc231    # 이후 매번, 빠르게 뜸
 ```bash
 cd part1-allocator/03-tcache
 bash build.sh
-gdb ./sample
+gdb ./sample231
 ```
+
+`build.sh`를 실행하면 해당 실행 환경의 glibc 버전이 덧붙여진 실행파일이 생성된다.
 
 ### 4. 컨테이너 나오기
 
