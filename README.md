@@ -55,11 +55,12 @@ heap-lab/
 ├── part1-allocator/
 │   ├── 00-heap-intro/
 │   ├── 01-chunk-layout/
-│   ├── 02-malloc-free/
-│   ├── 03-tcache/
-│   ├── 04-fastbin/
-│   ├── 05-unsorted-bin/
-│   └── 06-allocator-flow/
+│   ├── 02-malloc-arena/
+│   ├── 03-malloc-free/
+│   ├── 04-tcache/
+│   ├── 05-fastbin/
+│   ├── 06-unsorted-bin/
+│   └── 07-allocator-flow/
 │
 ├── part2-vulnerability/
 │   ├── 00-uaf/
