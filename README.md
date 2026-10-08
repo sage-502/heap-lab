@@ -56,11 +56,17 @@ heap-lab/
 │   ├── 00-heap-intro/
 │   ├── 01-chunk-layout/
 │   ├── 02-malloc-arena/
-│   ├── 03-malloc-free/
-│   ├── 04-tcache/
-│   ├── 05-fastbin/
-│   ├── 06-unsorted-bin/
-│   └── 07-allocator-flow/
+│   │
+│   ├── 03-bins-overview/
+│   ├── 04-malloc-free/
+│   │
+│   ├── 05-tcache/
+│   ├── 06-fastbin/
+│   ├── 07-unsorted-bin/
+│   ├── 08-smallbin/
+│   ├── 09-largebin/
+│   │
+│   └── 10-allocator-flow/
 │
 ├── part2-vulnerability/
 │   ├── 00-uaf/
