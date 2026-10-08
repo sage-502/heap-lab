@@ -375,7 +375,30 @@ main arena는 heap 영역에 있는 것이 아니라 libc 쪽에 존재하고, �
 
 ---
 
-### 3.4 멀티스레드 프로세스의 가상 메모리
+### 3.4 non-main arena와 heap
+
+non-main arena는 main arena가 사용하는 `[heap]` 영역을 나누어 사용하는 것이 아니라, 별도의 메모리 영역을 확보하여 자신에게 속한 chunk들을 관리한다.
+
+단순화하면 다음과 같다.
+
+```text
+non-main arena
+      |
+      v
+mmap 기반 heap
++----------------------+
+| heap metadata        |
+| allocator metadata   |
+| chunks               |
+| top chunk            |
++----------------------+
+```
+
+이때 non-main arena가 사용하는 각 heap 영역에는 해당 heap에 대한 정보를 저장하기 위한 `heap_info` 구조체가 존재한다.
+
+---
+
+### 3.5 멀티스레드 프로세스의 가상 메모리
 
 단일 스레드 프로세스의 가상 메모리를 매우 단순화하면 다음과 같이 표현할 수 있다.
 
@@ -775,9 +798,137 @@ small request를 처리하면서 chunk를 분할했을 때 남은 remainder와 �
 
 ---
 
-## 5. arena의 생성과 생명주기
+## 5. `heap_info`
 
-### 5.1 `main_arena`
+`heap_info`는 non-main arena가 사용하는 **개별 heap 영역의 정보를 저장하는 구조체**이다.
+
+`malloc_state`가 arena 자체의 allocator 상태를 저장한다면, `heap_info`는 해당 heap 영역이 어느 arena에 속하는지와 heap의 크기 등의 정보를 저장한다.
+
+개념적으로 둘의 역할은 다음과 같이 구분할 수 있다.
+
+```text
+malloc_state
+→ arena의 상태
+→ top, bins, fastbins, mutex 등
+
+heap_info
+→ 개별 heap 영역의 상태
+→ 어느 arena 소속인지
+→ heap의 크기
+→ 이전 heap 영역
+```
+
+#### `typedef struct _heap_info`
+
+glibc 2.31에서 `heap_info`는 다음과 같은 형태를 가진다.
+
+```c
+typedef struct _heap_info
+{
+    mstate ar_ptr;
+    struct _heap_info *prev;
+    size_t size;
+    size_t mprotect_size;
+    ...
+} heap_info;
+```
+
+주요 필드는 다음과 같다.
+
+- `ar_ptr`
+  - 해당 heap을 관리하는 arena의 `malloc_state`를 가리킨다.
+- `prev`
+  - 같은 arena에 속한 이전 heap 영역을 가리킨다.
+- `size`
+  - 현재 heap 영역의 크기를 저장한다.
+- `mprotect_size`
+  - 현재 heap에서 접근 가능하도록 설정된 메모리 크기와 관련된 값이다.
+
+특히 `ar_ptr`을 통해 heap에서 자신을 관리하는 arena를 찾을 수 있다.
+
+```text
+heap
+ |
+ | heap_info.ar_ptr
+ v
+malloc_state
+ |
+ v
+arena
+```
+
+즉 `malloc_state`가 자신이 관리하는 heap의 시작 주소와 끝 주소를 직접 저장하는 방식이라기보다, non-main heap 쪽의 `heap_info`가 자신이 어느 arena에 속하는지를 나타낸다.
+
+#### 예시
+
+arena A가 heap #1와 heap #2를 관리한다고 하면 다음과 같은 형태로 나타날 수 있다. 
+
+```text
+                 arena A
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+
+       heap #1             heap #2
++----------------+   +----------------+
+| heap_info      |   | heap_info      |
+| malloc_state   |   | chunks         |
+| chunks         |   | top chunk      |
++----------------+   +----------------+
+```
+
+non-main arena의 최초 heap에는 해당 arena의 `malloc_state`가 함께 저장된다.
+
+하지만 이후 추가된 heap마다 새로운 `malloc_state`가 만들어지는 것은 아니다. 
+이미 heap #1에 arena A를 표현하는 `malloc_state` 인스턴스가 저장되어 있기 때문에 이를 중복으로 만들 필요가 없다. 
+
+첫 haep 이후 추가되는 heap들은 `heap_info.ar_ptr`를 통해 그 arena의 `malloc_state`를 가리킨다.
+
+```text
+heap #1                         heap #2
+
+heap_info                      heap_info
+   |                              |
+   | ar_ptr                       | ar_ptr
+   +-------------+----------------+
+                 |
+                 v
+             malloc_state
+             (arena A)
+```
+
+또한 `heap_info.prev`를 이용하여 같은 arena에 속한 이전 heap 영역을 연결할 수 있다.
+
+```text
+heap #3
+   |
+  prev
+   v
+heap #2
+   |
+  prev
+   v
+heap #1
+```
+
+따라서 `malloc_state`와 `heap_info`의 관계는 다음과 같이 정리할 수 있다.
+
+```text
+malloc_state
+= arena 하나의 allocator 상태
+= arena당 하나
+
+heap_info
+= 개별 non-main heap 영역의 정보
+= heap 영역마다 하나
+```
+
+---
+
+## 6. arena의 생성과 생명주기
+
+### 6.1 `main_arena`
 
 `main_arena`는 필요할 때 동적으로 `malloc()`으로 생성되는 객체가 아니다.
 
@@ -814,7 +965,7 @@ allocator가 실제 메모리를 필요로 하면 시스템으로부터 메모�
 
 ---
 
-### 5.2 non-main arena의 생성
+### 6.2 non-main arena의 생성
 
 추가 arena들은 처음부터 최대 개수만큼 모두 생성되어 있는 것이 아니다.
 
@@ -849,7 +1000,7 @@ arena #2 생성
 
 ---
 
-### 5.3 thread 종료
+### 6.3 thread 종료
 
 thread가 종료되었다고 해서 해당 thread가 사용하던 arena 구조체가 즉시 사라지는 것은 아니다.
 
@@ -878,7 +1029,7 @@ attached_threads = 0
 
 ---
 
-### 5.4 arena 재사용
+### 6.4 arena 재사용
 
 현재 연결된 thread가 없는 arena는 이후 다른 thread가 사용할 수 있다.
 
@@ -909,7 +1060,7 @@ Thread B
 
 ---
 
-### 5.5 프로세스 종료
+### 6.5 프로세스 종료
 
 `main_arena`는 프로세스 실행 동안 존재한다.
 
@@ -944,6 +1095,613 @@ Thread B
 
 ---
 
-## 6. 실습
+## 7. 실습
 
-이제 gdb를 이용하여 실제 `main_arena`의 위치와 `top` 필드를 확인하고, `malloc()` 호출 전후로 arena의 상태가 어떻게 변하는지 관찰한다.
+이번 실습에서는 두 개의 thread에서 반복적으로 `malloc()`을 호출하여 main arena와 non-main arena를 생성하고, gdb를 이용해 실제 `malloc_state` 구조체와 heap의 관계를 확인한다.
+
+관찰할 내용은 다음과 같다.
+
+- main arena와 non-main arena의 생성 여부
+- arena들이 `next`를 통해 연결되는 구조
+- 각 arena의 `top`, `attached_threads`, `system_mem`
+- main arena와 non-main arena가 위치한 메모리 영역
+- non-main heap의 `heap_info`
+- `heap_info`와 `malloc_state`의 연결 관계
+
+---
+
+### 7.1 실습 코드와 실행 준비
+
+실습 코드는 다음과 같다.
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define COUNT 10000
+
+pthread_barrier_t barrier;
+
+void *worker(void *arg)
+{
+    void *p;
+
+    pthread_barrier_wait(&barrier);
+
+    for (int i = 0; i < COUNT; i++) {
+        p = malloc(0x100);
+        if (p == NULL)
+            exit(1);
+    }
+
+    printf("worker last chunk = %p\n", p);
+
+    pthread_barrier_wait(&barrier);
+
+    return NULL;
+}
+
+int main(void)
+{
+    pthread_t tid;
+    void *p;
+
+    pthread_barrier_init(&barrier, NULL, 2);
+
+    pthread_create(&tid, NULL, worker, NULL);
+
+    pthread_barrier_wait(&barrier);
+
+    for (int i = 0; i < COUNT; i++) {
+        p = malloc(0x100);
+        if (p == NULL)
+            exit(1);
+    }
+
+    printf("main last chunk   = %p\n", p);
+
+    pthread_barrier_wait(&barrier);
+
+    pthread_join(tid, NULL);
+
+    return 0;
+}
+```
+
+main thread와 worker thread가 barrier 이후 동시에 `malloc(0x100)`을 반복적으로 호출하도록 구성하였다.
+
+멀티스레드 프로그램이라고 해서 항상 non-main arena가 생성되는 것은 아니다.
+
+따라서 이번 실습에서는 두 thread가 동시에 allocator를 사용하도록 하여 arena에 대한 경합이 발생하도록 한다.
+
+먼저 `main()`의 어셈블리를 확인한다.
+
+```gdb
+(gdb) disas main
+```
+
+main thread에서 반복적으로 호출되는 `malloc(0x100)`은 다음과 같이 나타난다.
+
+```text
+0x0000000000001308 <+99>:   mov    edi,0x100
+0x000000000000130d <+104>:  call   0x10f0 <malloc@plt>
+0x0000000000001312 <+109>:  mov    QWORD PTR [rbp-0x10],rax
+```
+
+worker thread 역시 동일한 크기의 메모리를 반복적으로 할당한다.
+
+```gdb
+(gdb) disas worker
+```
+
+```text
+0x000000000000124e <+37>:   mov    edi,0x100
+0x0000000000001253 <+42>:   call   0x10f0 <malloc@plt>
+0x0000000000001258 <+47>:   mov    QWORD PTR [rbp-0x8],rax
+```
+
+이번 실습에서는 반복 할당이 끝난 뒤 arena 상태를 확인하기 위해 main thread의 두 번째 barrier 직전에 breakpoint를 설정하였다.
+
+```gdb
+(gdb) b *main+167
+Breakpoint 1 at 0x134c: file sample.c, line 47.
+
+(gdb) r
+```
+
+실행 후 다음과 같이 breakpoint에 도달하였다.
+
+```text
+main last chunk   = 0x5555557f13b0
+
+Thread 1 "sample231" hit Breakpoint 1, main () at sample.c:47
+47	    pthread_barrier_wait(&barrier);
+```
+
+현재 존재하는 thread도 확인한다.
+
+```gdb
+(gdb) info threads
+```
+
+```text
+  Id   Target Id                                  Frame
+* 1    Thread 0x7ffff7da9740 (LWP 23) "sample231" main () at sample.c:47
+  2    Thread 0x7ffff7da8700 (LWP 27) "sample231" ...
+```
+
+main thread와 worker thread 두 개가 존재하는 것을 확인할 수 있다.
+
+---
+
+### 7.2 main arena와 non-main arena 확인
+
+먼저 `main_arena`의 주소를 확인한다.
+
+```gdb
+(gdb) p/x &main_arena
+$1 = 0x7ffff7f98b80
+```
+
+다음으로 `main_arena.next`를 확인한다.
+
+```gdb
+(gdb) p/x main_arena.next
+$2 = 0x7ffff0000020
+```
+
+`main_arena` 자신의 주소와 다른 값이 나오므로 추가 arena가 생성되었음을 알 수 있다.
+
+다음 arena의 `next`를 다시 따라가 본다.
+
+```gdb
+(gdb) p/x main_arena.next->next
+$3 = 0x7ffff7f98b80
+```
+
+이 값은 처음 확인한 `&main_arena`와 같다.
+
+따라서 현재 arena들은 다음과 같은 원형 연결 구조를 가진다.
+
+```text
+main_arena
+0x7ffff7f98b80
+      |
+      | next
+      v
+non-main arena
+0x7ffff0000020
+      |
+      | next
+      v
+main_arena
+```
+
+즉 이번 실행에서는 main arena와 하나의 non-main arena가 존재한다.
+
+각 arena의 주요 상태도 비교한다.
+
+```gdb
+(gdb) p/x main_arena.top
+$4 = 0x5555557f18c0
+
+(gdb) p/x main_arena.next->top
+$5 = 0x7ffff01a7fb0
+```
+
+두 arena의 top chunk는 서로 다른 주소 영역에 존재한다.
+
+```text
+main_arena.top
+= 0x5555557f18c0
+
+non-main arena.top
+= 0x7ffff01a7fb0
+```
+
+각 arena에 연결된 thread 수도 확인한다.
+
+```gdb
+(gdb) p main_arena.attached_threads
+$6 = 1
+
+(gdb) p main_arena.next->attached_threads
+$7 = 1
+```
+
+이번 실행 시점에서는 두 arena 모두 하나의 thread가 연결되어 있다.
+
+단, 일반적으로 thread와 arena가 항상 1:1 관계를 가지는 것은 아니다.
+
+각 arena가 시스템으로부터 확보한 메모리 크기도 확인한다.
+
+```gdb
+(gdb) p/x main_arena.system_mem
+$8 = 0x2b5000
+
+(gdb) p/x main_arena.next->system_mem
+$9 = 0x1a8000
+```
+
+main arena는 `0x2b5000`, non-main arena는 `0x1a8000`의 `system_mem` 값을 가지고 있다.
+
+구조체 전체를 직접 출력할 수도 있다.
+
+```gdb
+(gdb) p main_arena
+```
+
+주요 필드는 다음과 같이 나타난다.
+
+```text
+mutex = 0
+flags = 0
+have_fastchunks = 0
+
+top = 0x5555557f18c0
+
+next = 0x7ffff0000020
+next_free = 0x0
+
+attached_threads = 1
+
+system_mem = 2838528
+max_system_mem = 2838528
+```
+
+실제 출력에서도 `top`, `next`, `attached_threads`, `system_mem` 등의 arena 상태를 확인할 수 있다.
+
+non-main arena도 동일하게 확인한다.
+
+```gdb
+(gdb) p *main_arena.next
+```
+
+```text
+mutex = 1
+flags = 2
+have_fastchunks = 0
+
+top = 0x7ffff01a7fb0
+
+next = 0x7ffff7f98b80 <main_arena>
+next_free = 0x0
+
+attached_threads = 1
+
+system_mem = 1736704
+max_system_mem = 1736704
+```
+
+non-main arena 역시 동일한 `malloc_state` 구조체를 사용하며, `next`를 통해 다시 main arena를 가리킨다.
+
+이를 간단히 정리하면 다음과 같다.
+
+```text
+main_arena
+├── top = 0x5555557f18c0
+├── next = non-main arena
+├── attached_threads = 1
+└── system_mem = 0x2b5000
+
+
+non-main arena
+├── top = 0x7ffff01a7fb0
+├── next = main_arena
+├── attached_threads = 1
+└── system_mem = 0x1a8000
+```
+
+---
+
+### 7.3 메모리 mapping과 heap 위치 확인
+
+앞에서 확인한 arena와 top chunk가 실제 프로세스의 가상 메모리 어디에 위치하는지 확인한다.
+
+```gdb
+(gdb) info proc mappings
+```
+
+main heap은 다음과 같이 나타난다.
+
+```text
+0x555555559000  0x55555580e000  0x2b5000  [heap]
+```
+
+앞에서 확인한 `main_arena.top`은:
+
+```text
+0x5555557f18c0
+```
+
+이므로 `[heap]` 영역 내부에 존재한다.
+
+```text
+[heap]
+
+0x555555559000
+       |
+       | allocated chunks
+       | ...
+       v
+0x5555557f18c0  ← main_arena.top
+       |
+       v
+0x55555580e000
+```
+
+이번 실행에서는 `[heap]` mapping의 크기인 `0x2b5000`과 `main_arena.system_mem`의 값도 동일하게 나타났다.
+
+`main_arena` 구조체 자체는 다음 주소에 존재한다.
+
+```text
+0x7ffff7f98b80
+```
+
+mapping을 확인하면 이 주소는 libc의 writable mapping 내부에 존재한다.
+
+따라서 main arena는 다음과 같이 볼 수 있다.
+
+```text
+libc mapping
++---------------------------+
+| main_arena                |
+|                           |
+| top ----------------------|------+
++---------------------------+      |
+                                   v
+[heap]
++---------------------------+
+| allocated chunks          |
+| ...                       |
+| top chunk                 |
++---------------------------+
+```
+
+반면 non-main arena의 주소는:
+
+```text
+0x7ffff0000020
+```
+
+이며 다음 anonymous mapping 내부에 존재한다.
+
+```text
+0x7ffff0000000  0x7ffff01a9000  0x1a9000
+```
+
+non-main arena의 top 역시:
+
+```text
+0x7ffff01a7fb0
+```
+
+으로 같은 anonymous mapping 내부에 존재한다.
+
+즉 main arena와 non-main arena의 메모리 배치는 다음과 같이 서로 다르다.
+
+```text
+main arena
+
+malloc_state
+→ libc mapping
+
+top chunk
+→ [heap]
+```
+
+```text
+non-main arena
+
+malloc_state
+→ anonymous mmap 영역
+
+top chunk
+→ 같은 mmap 기반 heap 영역
+```
+
+---
+
+### 7.4 non-main heap과 `heap_info` 확인
+
+마지막으로 non-main arena가 사용하는 heap 영역의 시작 부분을 직접 확인한다.
+
+```gdb
+(gdb) x/16gx 0x7ffff0000000
+```
+
+```text
+0x7ffff0000000:  0x00007ffff0000020  0x0000000000000000
+0x7ffff0000010:  0x00000000001a8000  0x00000000001a8000
+0x7ffff0000020:  0x0000000200000001  0x0000000000000000
+...
+```
+
+첫 `0x20`바이트는 non-main heap의 `heap_info`에 해당한다.
+
+64bit 환경에서 각 값을 대응시키면 다음과 같다.
+
+```text
+0x7ffff0000000
++-------------------------------+
+| ar_ptr = 0x7ffff0000020       |
++-------------------------------+
+| prev = 0x0                    |
++-------------------------------+
+| size = 0x1a8000               |
++-------------------------------+
+| mprotect_size = 0x1a8000      |
++-------------------------------+
+0x7ffff0000020
+```
+
+특히 `ar_ptr`의 값이 중요하다.
+
+```text
+heap_info.ar_ptr
+= 0x7ffff0000020
+```
+
+앞에서 확인한 non-main arena의 주소 역시:
+
+```text
+main_arena.next
+= 0x7ffff0000020
+```
+
+이다.
+
+따라서 실제 메모리에서 다음 관계를 확인할 수 있다.
+
+```text
+heap_info
+0x7ffff0000000
+    |
+    | ar_ptr
+    v
+malloc_state
+0x7ffff0000020
+    |
+    v
+non-main arena
+```
+
+즉 non-main heap의 `heap_info`가 자신을 관리하는 arena의 `malloc_state`를 가리킨다.
+
+non-main arena 주소부터 메모리를 다시 확인하면 다음과 같다.
+
+```gdb
+(gdb) x/16gx main_arena.next
+```
+
+```text
+0x7ffff0000020:  0x0000000200000001  0x0000000000000000
+...
+0x7ffff0000080:  0x00007ffff01a7fb0  0x0000000000000000
+0x7ffff0000090:  0x00007ffff0000080  0x00007ffff0000080
+```
+
+실제 non-main `malloc_state`는 `0x7ffff0000020`부터 시작한다.
+
+따라서 이번 실습에서 확인한 non-main heap의 시작 부분은 다음과 같이 나타낼 수 있다.
+
+```text
++-----------------------------+ 0x7ffff0000000
+| heap_info                   |
+|                             |
+| ar_ptr = 0x7ffff0000020     |
+| prev = NULL                 |
+| size = 0x1a8000             |
+| mprotect_size = 0x1a8000    |
++-----------------------------+ 0x7ffff0000020
+|                             |
+| struct malloc_state         |
+|                             |
+| mutex                       |
+| flags                       |
+| fastbinsY                   |
+| top                         |
+| bins                        |
+| ...                         |
++-----------------------------+
+|                             |
+| allocated chunks            |
+|                             |
++-----------------------------+
+| top chunk                   |
+| 0x7ffff01a7fb0              |
++-----------------------------+
+```
+
+이번 실행에서는 `heap_info.size`와 non-main arena의 `system_mem`이 모두 `0x1a8000`으로 나타났다.
+
+```text
+heap_info.size
+= 0x1a8000
+
+non-main arena.system_mem
+= 0x1a8000
+```
+
+이를 통해 `malloc_state`가 자신이 관리하는 heap의 시작과 끝 범위를 직접 저장하는 것이 아니라, non-main heap의 `heap_info`가 `ar_ptr`을 통해 자신을 관리하는 arena를 가리키는 구조임을 확인할 수 있다.
+
+---
+
+## 8. 정리
+
+이번 실습에서는 두 thread에서 반복적으로 `malloc()`을 호출하여 main arena와 non-main arena를 직접 관찰하였다.
+
+`main_arena.next`를 따라가면서 두 arena가 원형 연결 리스트 형태로 연결되어 있음을 확인했다.
+
+```text
+main_arena
+    |
+   next
+    v
+non-main arena
+    |
+   next
+    v
+main_arena
+```
+
+main arena의 `malloc_state`는 libc mapping 내부에 존재했으며, `top`은 `[heap]` 영역을 가리켰다.
+
+반면 non-main arena의 `malloc_state`와 `top`은 별도의 anonymous mmap 영역에 존재했다.
+
+또한 non-main heap의 시작 주소에서 `heap_info`를 직접 확인하였다.
+
+```text
+heap_info.ar_ptr
+      |
+      v
+malloc_state
+      |
+      v
+non-main arena
+```
+
+이번 실습에서 확인한 전체 관계를 단순화하면 다음과 같다.
+
+```text
+                    libc mapping
+
+                +------------------+
+                | main_arena       |
+                | malloc_state     |
+                |                  |
+                | top ----------+  |
+                | next -----+   |  |
+                +-----------|---|--+
+                            |   |
+                            |   v
+                            | [heap]
+                            | chunks
+                            | top chunk
+                            |
+                            v
+
+                anonymous mmap region
+
+                +------------------+
+                | heap_info        |
+                | ar_ptr -------+  |
+                +--------------|---+
+                               |
+                +--------------v---+
+                | malloc_state     |
+                | non-main arena   |
+                |                  |
+                | top ----------+  |
+                | next ---------|--|---> main_arena
+                +---------------|--+
+                                |
+                +---------------v-+
+                | chunks          |
+                | ...             |
+                | top chunk       |
+                +-----------------+
+```
+
+main arena와 non-main arena는 동일한 `malloc_state` 구조체를 사용하지만, 실제 구조체의 위치와 관리하는 heap의 형태에는 차이가 있음을 확인할 수 있었다.
