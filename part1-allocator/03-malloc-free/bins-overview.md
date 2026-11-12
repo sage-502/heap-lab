@@ -19,30 +19,27 @@ glibc malloc은 해제된 chunk를 재사용하기 위해 여러 종류의 free 
 
 ### 1.1 Free chunk의 재사용
 
-`malloc()`으로 할당받은 메모리를 `free()`하면 해당 메모리는 allocator에 반환된다.
+프로그램에서 메모리를 할당 받을 때 항상 힙 영역의 새로운 메모리를 반환해주는 것은 아니다. allocator는 매번 새로운 메모리를 제공해주는 대신, 이전에 `free()`로 이미 반환된 메모리를 돌려주어 chunk를 재사용할 수 있다.
 
-하지만 `free()`가 호출되었다고 해서 메모리 영역 자체가 즉시 사라지는 것은 아니다.
+`free()`를 호출하면 해당 chunk는 allocator에 반환된다. allocator는 chunk의 크기와 내부 상태에 따라 해제된 chunk를 별도로 관리할 수도 있고, 인접한 free chunk와 병합하여 관리할 수도 있다.
 
-allocator는 반환받은 chunk를 이후 `malloc()` 요청에서 다시 사용할 수 있다.
-
-예를 들어 다음 코드를 보자.
+예를 들어 아래 코드에서:
 
 ```c
 void *a = malloc(0x20);
 free(a);
-
 void *b = malloc(0x20);
 ```
 
 `a`가 가리키던 chunk는 `free(a)` 이후 재사용 가능한 상태가 된다.
 
-따라서 `malloc(0x20)`을 다시 호출했을 때 새로운 메모리를 확보하는 대신 기존 chunk를 재사용할 수 있다.
+이러면 `malloc(0x20)`을 다시 호출했을 때 새로운 메모리를 확보하는 대신 `a`가 쓰던 chunk를 재사용할 수 있다.
 
-단, 항상 같은 주소가 반환되는 것은 아니다. 실제 재사용 여부는 allocator의 상태와 할당 경로에 따라 결정된다.
+다만 항상 `a`가 쓰던 주소가 다시 반환되는 것은 아니며, 실제 재사용 여부는 allocator의 상태와 할당 경로에 따라 결정된다.
 
-### 1.2 Free list가 필요한 이유
+### 1.2 Free list
 
-프로그램이 여러 chunk를 할당하고 해제하면 heap에는 재사용 가능한 chunk들이 생긴다.
+이처럼 프로그램이 여러 chunk를 할당하고 해제하면 다음과 같이 heap에는 재사용 가능한 chunk들이 생긴다.
 
 ```text
 heap
@@ -60,9 +57,7 @@ heap
 +-------------------+
 ```
 
-allocator는 어떤 chunk가 재사용 가능한 상태인지 관리해야 한다.
-
-이를 위해 사용할 수 있는 자료구조가 **free list**이다.
+allocator는 여러 chunk 중 어떤 것이 재사용 가능한 상태인지 관리해야 한다. 이를 위해 사용하는 자료구조가 **free list**이다.
 
 ```text
 free list
@@ -98,9 +93,7 @@ free list
 - 인접한 free chunk를 병합하는 과정에 추가적인 처리 비용이 필요할 수 있다.
 - 멀티스레드 환경에서 공유 자료구조에 대한 lock 경합이 발생할 수 있다.
 
-이러한 문제는 자료구조와 탐색 알고리즘에 따라 달라지므로, free list가 하나라는 이유만으로 반드시 비효율적인 것은 아니다.
-
-glibc malloc은 다양한 크기와 상황의 메모리 요청을 효율적으로 처리하기 위해 여러 관리 구조를 사용한다.
+glibc malloc은 이런 문제를 피하고 다양한 크기와 상황의 메모리 요청을 효율적으로 처리하기 위해 여러 관리 구조를 사용한다.
 
 ---
 
@@ -108,7 +101,7 @@ glibc malloc은 다양한 크기와 상황의 메모리 요청을 효율적으�
 
 ### 2.1 Bin이란?
 
-**Bin은 allocator가 재사용 가능한 free chunk를 관리하기 위한 자료구조이다.**
+Bin은 glibc malloc이 해제된 chunk를 크기나 관리 목적에 따라 분류하고 관리하기 위한 논리적인 단위이다. 각 bin은 free list를 이용해 chunk들을 연결하여 관리한다.
 
 glibc malloc은 chunk의 크기와 관리 목적에 따라 여러 종류의 bin을 사용한다.
 
@@ -149,7 +142,7 @@ glibc malloc은 이러한 특성을 고려하여 서로 다른 관리 정책을 
 | smallbin | 동일한 크기의 free chunk를 크기별로 관리 |
 | largebin | 비교적 큰 free chunk를 크기 범위별로 관리 |
 
-**tcache와 fastbin은 빠른 재사용에 중점을 두며, 일반 bin은 크기별 탐색과 메모리 재사용을 위한 구조를 제공한다.**
+tcache와 fastbin은 빠른 재사용에 중점을 두며, 일반 bin은 크기별 탐색과 메모리 재사용을 위한 구조를 제공한다.
 
 단, 실제 `malloc()`이 bin을 확인하는 순서와 각 bin으로 chunk가 들어가는 조건은 단순히 이 표만으로 결정되지 않는다.
 
@@ -320,6 +313,8 @@ allocator는 이 값을 이용해 fastbin에 대한 consolidation 처리가 필�
 여기서 consolidation은 인접한 free chunk를 병합하는 작업을 의미한다.
 
 ### 4.3 일반 bin
+
+malloc_state의 bins[]는 bin 중 unsorted bin, smallbin, largebin의 free list를 구현한 배열이다. 각 리스트의 첫 번째 chunk와 마지막 chunk를 가리키는 fd, bk 포인터 쌍을 저장하며, 실제 리스트의 노드는 heap에 존재하는 free chunk이다.
 
 ```c
 mchunkptr bins[NBINS * 2 - 2];
