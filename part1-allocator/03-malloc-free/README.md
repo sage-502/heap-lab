@@ -40,3 +40,16 @@ if (__builtin_expect (hook != NULL, 0))
 
 malloc hook이 설정되어 있는지 확인하고, 설정되어 있다면 해당 함수를 대신 실행하는 부분이다. 
 
+`*hook` 은 함수 포인터 변수이며, 여기에 `atomic_forced_read (__malloc_hook)` 로 `__malloc_hook`의 값을 읽어 넣는다. `__malloc_hook`은 glibc 2.31에서 malloc 호출을 가로채기 위해 사용할 수 있는 함수 포인터이다.
+
+만약 `hook`이 `NULL`이 아니라면 hook이 가리키는 함수를 호출한다. hook을 호출하면 `return`을 사용하기 때문에 이 뒤에 있는 tcache 검사나 `_int_malloc()`을 실행하지 않게 된다.
+
+> **노트 ─ malloc hook의 용도**
+>
+> malloc hook은 과거 glibc에서 사용자 정의 메모리 할당 처리나 디버깅, 할당 추적 등을 지원하기 위해 제공됐다.
+> 하지만 malloc hook에서 다음과 같은 문제가 발생하여 glibc 2.34에서부터 사용하지 않게 되었다.
+>
+> - 멀티스레드 안전성: malloc hook을 변경하는 과정이 멀티스레드 환경에서 안전하지 않음.
+> - 성능: allocator가 hook과 디버깅 기능을 처리하면서 불필요한 오버헤드가 발생함.
+> - 유지보수: 디버깅 코드가 allocator 내부에 밀접하게 결합되어 개선 작업을 복잡하게 만듦.
+> - 보안: 보호되지 않은 함수 포인터가 공격에 유용한 실행 흐름 탈취
