@@ -1,5 +1,7 @@
 # malloc-free
 
+이 문서에서는 malloc과 free가 어떻게 동작하는지 알아본다. 
+
 ## 1. malloc
 
 ### 1.1 `__libc_malloc()`
@@ -1002,3 +1004,58 @@ tcache와 fastbin에서는 chunk를 해제할 때 인접 chunk와 즉시 병합�
 또한 일반 free 처리에서 chunk 크기가 일정 기준 이상이면 fastbin consolidation이나 시스템에 대한 메모리 반환이 추가로 수행될 수 있다.
 
 결과적으로 glibc free는 **해제된 chunk를 재사용할 수 있도록 관리하면서, 처리 경로에 따라 빠른 재사용을 우선하거나 인접 chunk를 병합하는 방식**으로 동작한다.
+
+---
+
+## 3. 실습 구성
+
+malloc과 free를 3회 반복하여 메모리를 할당 받고 해제되었던 메모리를 재사용하는 것을 관찰한다. 또한 gdb로 `__libc_malloc()`과 `_int_malloc()`의 진입을 확인한다.
+
+실습에서 확인할 흐름은 다음과 같다.
+
+1. 첫 번째 malloc — top chunk 분할: 재사용할 chunk가 없으므로 _int_malloc()에서 top chunk를 분할하고, main_arena.top이 이동하는 모습 관찰
+2. free 이후 재할당 — 기존 chunk 재사용: 처음 할당한 chunk를 해제하고 같은 크기로 다시 요청. 반환 주소가 동일하고, tcache에서 처리하므로 _int_malloc()에 진입하지 않는지 확인.
+3. 추가 malloc — top chunk 재사용: 재할당한 chunk를 해제하지 않고 다시 malloc()을 호출. 사용할 free chunk가 없으면 _int_malloc()을 거쳐 top chunk를 다시 분할하는지 확인.
+
+### 실습 코드
+
+```
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void)
+{
+    // 준비: tcache 및 heap 초기화
+    void *warmup = malloc(0x10);
+
+    // 1. top chunk에서 새 chunk 할당
+    void *a = malloc(0x20);
+
+    // 2. 해제 후 동일 크기로 재할당
+    free(a);
+    void *b = malloc(0x20);
+
+    // 3. b를 해제하지 않고 추가 할당
+    void *c = malloc(0x20);
+
+    printf("a = %p\n", a);
+    printf("b = %p\n", b);
+    printf("c = %p\n", c);
+
+    free(b);
+    free(c);
+    free(warmup);
+
+    return 0;
+}
+```
+
+---
+
+## 4. 실습
+
+### 4.1 첫 번째 malloc — top chunk 분할
+
+### 4.2 free 이후 재할당 — 기존 chunk 재사용
+
+### 4.3 추가 malloc — top chunk 재사용
